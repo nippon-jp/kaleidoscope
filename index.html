@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    
+    <!-- GitHub Repo Optimization: Meta Tags -->
+    <title>Interactive Kaleidoscope - Hyper Density Tunnel</title>
+    <meta name="description" content="A high-performance, interactive kaleidoscope built with HTML5 Canvas. Experience hyper-density patterns with touch and mouse interaction.">
+    <meta property="og:title" content="Interactive Kaleidoscope">
+    <meta property="og:description" content="Interactive visual experience with 7,000+ particles.">
+    <meta property="og:type" content="website">
+    <meta name="author" content="GitHub Contributor">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            color: #fff;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            touch-action: none;
+            position: fixed;
+            width: 100%;
+            height: 100%;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            cursor: crosshair;
+        }
+        .ui-container {
+            position: fixed;
+            bottom: calc(20px + env(safe-area-inset-bottom));
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            z-index: 50;
+            transition: opacity 0.5s ease;
+        }
+        .ui-hide {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .guide-text {
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            text-align: center;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px);
+            padding: 10px 20px;
+            border-radius: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            white-space: nowrap;
+        }
+        .action-btns {
+            display: flex;
+            gap: 8px;
+        }
+        .icon-btn {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 8px;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+        }
+        .icon-btn:hover {
+            background: rgba(255, 255, 255, 0.25);
+            transform: scale(1.1);
+        }
+        @media (max-width: 640px) {
+            .guide-text { font-size: 10px; padding: 8px 16px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui" class="ui-container">
+        <div class="action-btns">
+            <!-- 画像保存ボタン -->
+            <button id="btn-save" class="icon-btn" title="画像を保存">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            </button>
+            <!-- UI表示切替ボタン -->
+            <button id="btn-hide" class="icon-btn" title="UIを隠す">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+            </button>
+        </div>
+        <div class="guide-text">
+            Tap: Move Center & Cycle | Double Tap: Randomize | Pinch: Zoom
+        </div>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <script>
+        /**
+         * Interactive Kaleidoscope - Pastel & High Density Optimized
+         */
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d', { alpha: false });
+        const buffer = document.createElement('canvas');
+        const bctx = buffer.getContext('2d', { alpha: false });
+
+        let width, height, radius, dpr;
+        let segments = 12;
+        let zoom = 1.0;
+        let time = 0;
+        
+        let centerX, centerY;
+        let targetCenterX, targetCenterY;
+        
+        let mouseX = 0, mouseY = 0;
+        let targetMouseX = 0, targetMouseY = 0;
+        
+        let initialPinchDist = null;
+        let initialZoom = 1.0;
+        let lastTapTime = 0;
+        let uiVisible = true;
+
+        const PARTICLE_COUNT = 7425; 
+        let particles = [];
+
+        function init() {
+            resize();
+            centerX = targetCenterX = width / 2;
+            centerY = targetCenterY = height / 2;
+            
+            createParticles();
+            
+            window.addEventListener('resize', handleResize);
+            window.addEventListener('mousemove', handleMouseMove);
+            window.addEventListener('touchstart', handleTouchStart, { passive: false });
+            window.addEventListener('touchmove', handleTouchMove, { passive: false });
+            window.addEventListener('touchend', handleTouchEnd, { passive: false });
+            window.addEventListener('mousedown', handleMouseDown);
+            window.addEventListener('keydown', handleKeyDown);
+
+            document.getElementById('btn-save').addEventListener('click', saveImage);
+            document.getElementById('btn-hide').addEventListener('click', toggleUI);
+
+            animate();
+        }
+
+        function handleResize() {
+            const oldW = width, oldH = height;
+            resize();
+            targetCenterX = (targetCenterX / oldW) * width;
+            targetCenterY = (targetCenterY / oldH) * height;
+        }
+
+        function handleMouseMove(e) {
+            targetMouseX = (e.clientX - width / 2) / (width / 2);
+            targetMouseY = (e.clientY - height / 2) / (height / 2);
+        }
+
+        function handleMouseDown(e) {
+            if (e.target.closest('button')) return;
+            const now = Date.now();
+            if (now - lastTapTime < 300) {
+                createParticles();
+            } else {
+                targetCenterX = e.clientX;
+                targetCenterY = e.clientY;
+                cycleSegments();
+            }
+            lastTapTime = now;
+        }
+
+        function handleTouchStart(e) {
+            if (e.target.closest('button')) return;
+            e.preventDefault();
+            if (e.touches.length === 2) {
+                initialPinchDist = Math.hypot(
+                    e.touches[0].pageX - e.touches[1].pageX,
+                    e.touches[0].pageY - e.touches[1].pageY
+                );
+                initialZoom = zoom;
+            } else if (e.touches.length === 1) {
+                const now = Date.now();
+                const touch = e.touches[0];
+                if (now - lastTapTime < 300) {
+                    createParticles();
+                } else {
+                    targetCenterX = touch.clientX;
+                    targetCenterY = touch.clientY;
+                    cycleSegments();
+                }
+                lastTapTime = now;
+            }
+        }
+
+        function handleTouchMove(e) {
+            e.preventDefault();
+            if (e.touches.length === 2 && initialPinchDist !== null) {
+                const currentDist = Math.hypot(
+                    e.touches[0].pageX - e.touches[1].pageX,
+                    e.touches[0].pageY - e.touches[1].pageY
+                );
+                const delta = currentDist / initialPinchDist;
+                zoom = Math.min(Math.max(initialZoom * delta, 0.4), 4.0);
+            } else if (e.touches.length === 1) {
+                const touch = e.touches[0];
+                targetCenterX = touch.clientX;
+                targetCenterY = touch.clientY;
+            }
+        }
+
+        function handleTouchEnd(e) {
+            if (e.touches.length < 2) initialPinchDist = null;
+        }
+
+        function handleKeyDown(e) {
+            if (e.key.toLowerCase() === 'h') toggleUI();
+            if (e.key.toLowerCase() === 's') saveImage();
+        }
+
+        function toggleUI() {
+            uiVisible = !uiVisible;
+            document.getElementById('ui').className = uiVisible ? 'ui-container' : 'ui-container ui-hide';
+        }
+
+        function saveImage() {
+            const link = document.createElement('a');
+            link.download = `kaleidoscope-${Date.now()}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+
+        function cycleSegments() {
+            const options = [6, 8, 12, 16, 24, 32];
+            let currentIndex = options.indexOf(segments);
+            segments = options[(currentIndex + 1) % options.length];
+        }
+
+        function resize() {
+            dpr = window.devicePixelRatio || 1;
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width * dpr;
+            canvas.height = height * dpr;
+            radius = Math.max(width, height) * 1.5;
+            buffer.width = radius;
+            buffer.height = radius;
+        }
+
+        function createParticles() {
+            particles = [];
+            
+            const rand = Math.random();
+            let theme = 'random';
+            if (rand < 0.4) theme = 'warm';
+            else if (rand < 0.8) theme = 'pastel'; // パステルカラーの確率を高めに設定
+
+            const warmHues = [0, 15, 30, 45, 60, 345, 355];
+            let baseHue = Math.random() * 360;
+            if (theme === 'warm') {
+                baseHue = warmHues[Math.floor(Math.random() * warmHues.length)];
+            }
+
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                let h, s, l;
+                
+                if (theme === 'pastel') {
+                    // パステル: 彩度低め、明度高め
+                    h = Math.random() * 360;
+                    s = 40 + Math.random() * 30; // 40-70%
+                    l = 80 + Math.random() * 10; // 80-90%
+                } else if (theme === 'warm') {
+                    // 暖色: 彩度高め、明度普通〜高め
+                    h = (baseHue + Math.random() * 60 - 30) % 360;
+                    s = 80 + Math.random() * 20; // 80-100%
+                    l = 50 + Math.random() * 25; // 50-75%
+                } else {
+                    // フルランダム
+                    h = Math.random() * 360;
+                    s = 70 + Math.random() * 30;
+                    l = 50 + Math.random() * 20;
+                }
+
+                particles.push({
+                    angle: Math.random() * Math.PI * 2,
+                    dist: Math.random(), 
+                    speed: 0.0003 + Math.random() * 0.0018,
+                    size: 4 + Math.random() * 22, 
+                    rot: Math.random() * Math.PI * 2,
+                    vr: (Math.random() - 0.5) * 0.008,
+                    hue: h,
+                    sat: s,
+                    light: l,
+                    sides: Math.floor(Math.random() * 4) + 3,
+                    offset: Math.random() * 100
+                });
+            }
+        }
+
+        function drawSource() {
+            bctx.fillStyle = '#050505';
+            bctx.fillRect(0, 0, buffer.width, buffer.height);
+            
+            bctx.save();
+            bctx.translate(buffer.width / 2, buffer.height / 2);
+            bctx.scale(zoom, zoom);
+            bctx.translate(mouseX * 150, mouseY * 150);
+            bctx.rotate(time * 0.01);
+
+            particles.forEach(p => {
+                p.dist += p.speed;
+                if (p.dist > 1.2) {
+                    p.dist = 0; 
+                    p.angle = Math.random() * Math.PI * 2; 
+                }
+
+                const scale = Math.pow(p.dist, 1.3); 
+                const currentDist = p.dist * radius * 0.98;
+                const currentSize = p.size * (0.05 + scale * 1.4);
+                const alpha = Math.min(p.dist * 4.5, 0.7) * (1.1 - p.dist);
+
+                if (alpha < 0.05) return;
+
+                bctx.save();
+                bctx.rotate(p.angle);
+                bctx.translate(currentDist, Math.sin(time * 0.1 + p.offset) * 8);
+                bctx.rotate(p.rot + time * p.vr * 6);
+                
+                const grad = bctx.createRadialGradient(0, 0, 0, 0, 0, currentSize);
+                // 保存されたsatとlightを使用
+                grad.addColorStop(0, `hsla(${p.hue}, ${p.sat}%, ${p.light}%, ${alpha})`);
+                grad.addColorStop(0.5, `hsla(${p.hue}, ${p.sat}%, ${p.light - 20}%, ${alpha * 0.4})`);
+                grad.addColorStop(1, `hsla(${p.hue}, ${p.sat}%, ${p.light - 40}%, 0)`);
+                
+                bctx.fillStyle = grad;
+                bctx.fillRect(-currentSize, -currentSize, currentSize * 2, currentSize * 2);
+
+                bctx.restore();
+            });
+            bctx.restore();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            time += 0.01;
+
+            centerX += (targetCenterX - centerX) * 0.1;
+            centerY += (targetCenterY - centerY) * 0.1;
+            mouseX += (targetMouseX - mouseX) * 0.05;
+            mouseY += (targetMouseY - mouseY) * 0.05;
+
+            drawSource();
+
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, width, height);
+
+            const sliceAngle = (Math.PI * 2) / segments;
+            
+            ctx.save();
+            ctx.translate(centerX, centerY);
+
+            for (let i = 0; i < segments; i++) {
+                ctx.save();
+                ctx.rotate(i * sliceAngle);
+                if (i % 2 === 1) ctx.scale(1, -1);
+
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.arc(0, 0, radius, -sliceAngle / 2, sliceAngle / 2);
+                ctx.lineTo(0, 0);
+                ctx.clip();
+
+                ctx.drawImage(buffer, 0, -radius / 2, radius, radius);
+                ctx.restore();
+            }
+            ctx.restore();
+            
+            const centerGlow = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius * 0.9);
+            centerGlow.addColorStop(0, 'rgba(0,0,0,0.15)');
+            centerGlow.addColorStop(0.3, 'rgba(0,0,0,0)');
+            centerGlow.addColorStop(1, 'rgba(0,0,0,0.6)');
+            ctx.fillStyle = centerGlow;
+            ctx.fillRect(0, 0, width, height);
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
