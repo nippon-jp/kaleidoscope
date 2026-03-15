@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Interactive Kaleidoscope - Hyper Density</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            color: #fff;
+            font-family: system-ui, -apple-system, sans-serif;
+            touch-action: none;
+            position: fixed;
+            width: 100%;
+            height: 100%;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        .guide-text {
+            position: fixed;
+            bottom: calc(20px + env(safe-area-inset-bottom));
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            pointer-events: none;
+            text-align: center;
+            width: 90%;
+            max-width: 400px;
+            text-shadow: 0 0 8px rgba(0,0,0,1);
+            background: rgba(0,0,0,0.4);
+            backdrop-filter: blur(4px);
+            padding: 8px 12px;
+            border-radius: 20px;
+            z-index: 10;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        @media (min-width: 768px) {
+            .guide-text {
+                font-size: 13px;
+                bottom: 30px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="guide-text">
+        タップ: 中心移動・対称切替 | ダブルタップ: 再生成 | ピンチ: ズーム
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const buffer = document.createElement('canvas');
+        const bctx = buffer.getContext('2d');
+
+        // State Management
+        let width, height, radius, dpr;
+        let segments = 12;
+        let zoom = 1.0;
+        let time = 0;
+        
+        // Symmetry Center
+        let centerX, centerY;
+        let targetCenterX, targetCenterY;
+        
+        // Pattern drift
+        let mouseX = 0, mouseY = 0;
+        let targetMouseX = 0, targetMouseY = 0;
+        
+        let initialPinchDist = null;
+        let initialZoom = 1.0;
+        let lastTapTime = 0;
+
+        // パーティクル設定：さらに3倍（2475 -> 7425）に変更
+        // 合計 7425 個のパーティクルを描画。もはや光の流体のような密度。
+        const PARTICLE_COUNT = 7425; 
+        let particles = [];
+
+        function init() {
+            resize();
+            // 初期中心
+            centerX = targetCenterX = width / 2;
+            centerY = targetCenterY = height / 2;
+            
+            createParticles();
+            
+            let resizeTimeout;
+            window.addEventListener('resize', () => {
+                clearTimeout(resizeTimeout);
+                resizeTimeout = setTimeout(() => {
+                    const oldW = width, oldH = height;
+                    resize();
+                    targetCenterX = (targetCenterX / oldW) * width;
+                    targetCenterY = (targetCenterY / oldH) * height;
+                }, 100);
+            });
+            
+            // Mouse Movement
+            window.addEventListener('mousemove', (e) => {
+                targetMouseX = (e.clientX - width / 2) / (width / 2);
+                targetMouseY = (e.clientY - height / 2) / (height / 2);
+            });
+
+            // Touch Events
+            window.addEventListener('touchstart', handleTouchStart, { passive: false });
+            window.addEventListener('touchmove', handleTouchMove, { passive: false });
+            window.addEventListener('touchend', handleTouchEnd, { passive: false });
+
+            // Click interaction
+            window.addEventListener('mousedown', (e) => {
+                const now = Date.now();
+                if (now - lastTapTime < 300) {
+                    createParticles();
+                } else {
+                    targetCenterX = e.clientX;
+                    targetCenterY = e.clientY;
+                    cycleSegments();
+                }
+                lastTapTime = now;
+            });
+
+            animate();
+        }
+
+        function handleTouchStart(e) {
+            e.preventDefault();
+            if (e.touches.length === 2) {
+                initialPinchDist = Math.hypot(
+                    e.touches[0].pageX - e.touches[1].pageX,
+                    e.touches[0].pageY - e.touches[1].pageY
+                );
+                initialZoom = zoom;
+            } else if (e.touches.length === 1) {
+                const now = Date.now();
+                const touch = e.touches[0];
+                if (now - lastTapTime < 300) {
+                    createParticles();
+                } else {
+                    targetCenterX = touch.clientX;
+                    targetCenterY = touch.clientY;
+                    targetMouseX = (touch.clientX - width / 2) / (width / 2);
+                    targetMouseY = (touch.clientY - height / 2) / (height / 2);
+                    cycleSegments();
+                }
+                lastTapTime = now;
+            }
+        }
+
+        function handleTouchMove(e) {
+            e.preventDefault();
+            if (e.touches.length === 2 && initialPinchDist !== null) {
+                const currentDist = Math.hypot(
+                    e.touches[0].pageX - e.touches[1].pageX,
+                    e.touches[0].pageY - e.touches[1].pageY
+                );
+                const delta = currentDist / initialPinchDist;
+                zoom = Math.min(Math.max(initialZoom * delta, 0.4), 3.0);
+            } else if (e.touches.length === 1) {
+                const touch = e.touches[0];
+                targetCenterX = touch.clientX;
+                targetCenterY = touch.clientY;
+                targetMouseX = (touch.clientX - width / 2) / (width / 2);
+                targetMouseY = (touch.clientY - height / 2) / (height / 2);
+            }
+        }
+
+        function handleTouchEnd(e) {
+            if (e.touches.length < 2) {
+                initialPinchDist = null;
+            }
+        }
+
+        function cycleSegments() {
+            const options = [6, 8, 12, 16, 24, 32];
+            let currentIndex = options.indexOf(segments);
+            segments = options[(currentIndex + 1) % options.length];
+        }
+
+        function resize() {
+            dpr = window.devicePixelRatio || 1;
+            width = window.innerWidth;
+            height = window.innerHeight;
+            
+            canvas.width = width * dpr;
+            canvas.height = height * dpr;
+            
+            radius = Math.max(width, height) * 1.5;
+            
+            buffer.width = radius;
+            buffer.height = radius;
+        }
+
+        function createParticles() {
+            particles = [];
+            const isMulticolor = Math.random() > 0.45;
+            let baseHue = Math.random() * 360;
+
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                let hue = isMulticolor ? Math.random() * 360 : (baseHue + Math.random() * 80 - 40) % 360;
+                particles.push({
+                    angle: Math.random() * Math.PI * 2,
+                    dist: Math.random(), 
+                    speed: 0.0003 + Math.random() * 0.002, // 数量が膨大なため、速度をさらに抑えて幻想的な動きに
+                    size: 5 + Math.random() * 25, // 重なりを美しくするため、一つ一つのサイズをより細かく
+                    rot: Math.random() * Math.PI * 2,
+                    vr: (Math.random() - 0.5) * 0.008,
+                    hue: hue,
+                    sides: Math.floor(Math.random() * 4) + 3,
+                    offset: Math.random() * 100
+                });
+            }
+        }
+
+        function drawSource() {
+            bctx.fillStyle = '#050505';
+            bctx.fillRect(0, 0, buffer.width, buffer.height);
+            
+            bctx.save();
+            bctx.translate(buffer.width / 2, buffer.height / 2);
+            bctx.scale(zoom, zoom);
+            bctx.translate(mouseX * 150, mouseY * 150);
+            bctx.rotate(time * 0.012);
+
+            particles.forEach(p => {
+                p.dist += p.speed;
+                if (p.dist > 1.2) {
+                    p.dist = 0; 
+                    p.angle = Math.random() * Math.PI * 2; 
+                }
+
+                const scale = Math.pow(p.dist, 1.3); 
+                const currentDist = p.dist * radius * 0.98;
+                const currentSize = p.size * (0.05 + scale * 1.4);
+                // 密度を考慮し、アルファ値をさらに微調整
+                const alpha = Math.min(p.dist * 4.5, 0.75) * (1.1 - p.dist);
+
+                bctx.save();
+                bctx.rotate(p.angle);
+                bctx.translate(currentDist, Math.sin(time * 0.1 + p.offset) * 8);
+                bctx.rotate(p.rot + time * p.vr * 6);
+                
+                bctx.beginPath();
+                const step = (Math.PI * 2) / p.sides;
+                for(let i = 0; i < p.sides; i++) {
+                    const x = Math.cos(i * step) * currentSize;
+                    const y = Math.sin(i * step) * currentSize;
+                    if(i === 0) bctx.moveTo(x, y);
+                    else bctx.lineTo(x, y);
+                }
+                bctx.closePath();
+                
+                const grad = bctx.createRadialGradient(0, 0, 0, 0, 0, currentSize);
+                grad.addColorStop(0, `hsla(${p.hue}, 100%, 75%, ${alpha})`);
+                grad.addColorStop(0.5, `hsla(${p.hue}, 90%, 50%, ${alpha * 0.5})`);
+                grad.addColorStop(1, `hsla(${p.hue + 10}, 80%, 20%, 0)`);
+                
+                bctx.fillStyle = grad;
+                bctx.fill();
+                
+                // 線の太さを極限まで細くし、光の粒子感を強調
+                if (alpha > 0.2) {
+                    bctx.strokeStyle = `hsla(${p.hue}, 100%, 85%, ${alpha * 0.15})`;
+                    bctx.lineWidth = 0.5;
+                    bctx.stroke();
+                }
+
+                bctx.restore();
+            });
+            bctx.restore();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            time += 0.01;
+
+            centerX += (targetCenterX - centerX) * 0.1;
+            centerY += (targetCenterY - centerY) * 0.1;
+            mouseX += (targetMouseX - mouseX) * 0.05;
+            mouseY += (targetMouseY - mouseY) * 0.05;
+
+            drawSource();
+
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, width, height);
+
+            const sliceAngle = (Math.PI * 2) / segments;
+            
+            ctx.save();
+            ctx.translate(centerX, centerY);
+
+            for (let i = 0; i < segments; i++) {
+                ctx.save();
+                ctx.rotate(i * sliceAngle);
+                
+                if (i % 2 === 1) {
+                    ctx.scale(1, -1);
+                }
+
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.arc(0, 0, radius, -sliceAngle / 2, sliceAngle / 2);
+                ctx.lineTo(0, 0);
+                ctx.clip();
+
+                ctx.drawImage(buffer, 0, -radius / 2, radius, radius);
+                
+                ctx.restore();
+            }
+            ctx.restore();
+            
+            const centerGlow = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius * 0.9);
+            centerGlow.addColorStop(0, 'rgba(0,0,0,0.2)');
+            centerGlow.addColorStop(0.3, 'rgba(0,0,0,0)');
+            centerGlow.addColorStop(1, 'rgba(0,0,0,0.6)');
+            ctx.fillStyle = centerGlow;
+            ctx.fillRect(0, 0, width, height);
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
