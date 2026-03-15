@@ -3,295 +3,720 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    
-    <title>Interactive Kaleidoscope</title>
-    <meta name="description" content="High-performance interactive kaleidoscope.">
-
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>花曼荼羅</title>
     <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            background-color: #000;
-            color: #fff;
-            font-family: system-ui, -apple-system, sans-serif;
-            touch-action: none;
-            position: fixed;
-            width: 100%;
-            height: 100%;
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { overflow:hidden; background:#000; position:fixed; width:100%; height:100%; touch-action:none; }
+        canvas { display:block; width:100vw; height:100vh; cursor:none; }
+        #hud {
+            position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+            z-index:20; display:flex; gap:12px;
+            pointer-events:none; opacity:0; transition:opacity 0.5s;
         }
-        canvas {
-            display: block;
-            width: 100vw;
-            height: 100vh;
-            cursor: none; /* カーソルを非表示にして没入感を高める */
+        body:hover #hud { opacity:1; }
+        .pill {
+            font-family:'Courier New',monospace; font-size:9px;
+            letter-spacing:2px; text-transform:uppercase;
+            color:rgba(255,255,255,0.45);
+            border:1px solid rgba(255,255,255,0.12); padding:5px 12px;
+            border-radius:20px; background:rgba(0,0,0,0.5); backdrop-filter:blur(8px);
+        }
+        #grain {
+            position:fixed; top:-50%; left:-50%; width:200%; height:200%;
+            pointer-events:none; z-index:16; opacity:0.02;
+            animation:gm 0.1s steps(1) infinite;
+        }
+        @keyframes gm {
+            0%{transform:translate(0,0)} 25%{transform:translate(3%,-2%)}
+            50%{transform:translate(-2%,3%)} 75%{transform:translate(2%,1%)}
         }
     </style>
 </head>
 <body>
+<canvas id="canvas"></canvas>
+<canvas id="grain"></canvas>
+<div id="hud">
+    <div class="pill">CLICK · CENTER</div>
+    <div class="pill">DOUBLE · REBLOOM</div>
+    <div class="pill">PINCH · ZOOM</div>
+    <div class="pill" id="seg-display">12 FOLD</div>
+</div>
+<script>
+// 花曼荼羅 — 黒背景に咲く花々のカリダイスコープ
 
-    <canvas id="canvas"></canvas>
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d', {alpha:false});
+const buf    = document.createElement('canvas');
+const bx     = buf.getContext('2d', {alpha:false});
+// ワープ投影用スナップショットキャンバス
+const warpSnapshot = document.createElement('canvas');
+const wsx = warpSnapshot.getContext('2d');
+const grainC = document.getElementById('grain');
+const gctx   = grainC.getContext('2d');
 
-    <script>
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d', { alpha: false });
-        const buffer = document.createElement('canvas');
-        const bctx = buffer.getContext('2d', { alpha: false });
+let W,H,R,dpr;
+let time=0, segments=12, zoom=1;
+let cx,cy,tcx,tcy;
+let mx=0,my=0,tmx=0,tmy=0;
+let beat=0,beatV=0;
+let eyeOpen=0, lastTap=0;
+let pinchDist0=null, zoom0=1;
+let hueShift=0;
+let globalHue=0;
 
-        let width, height, radius, dpr;
-        let segments = 12;
-        let zoom = 1.0;
-        let time = 0;
-        
-        let centerX, centerY;
-        let targetCenterX, targetCenterY;
-        
-        let mouseX = 0, mouseY = 0;
-        let targetMouseX = 0, targetMouseY = 0;
-        
-        let initialPinchDist = null;
-        let initialZoom = 1.0;
-        let lastTapTime = 0;
+// ワープレイヤー（添付コードより）
+const WARP_LAYERS = 18;
+let warpLayers = [];
+// スピードライン
+const speedLines = [];
+for(let i=0;i<65;i++){
+    speedLines.push({
+        angle: Math.random()*Math.PI*2,
+        dist:  Math.random()*1800,
+        len:   Math.random()*55+18,
+        spd:   1.1+Math.random()*1.9
+    });
+}
 
-        const PARTICLE_COUNT = 800; 
-        let particles = [];
+function initWarpLayers(){
+    warpLayers=[];
+    for(let i=0;i<WARP_LAYERS;i++){
+        warpLayers.push({
+            scale:        (i/WARP_LAYERS)*7,
+            rotOffset:    Math.random()*Math.PI*2,
+            rotMult:      0.5+Math.random()*2.0,
+            driftX:       (Math.random()-0.5)*12,
+            driftY:       (Math.random()-0.5)*12,
+        });
+    }
+}
 
-        function init() {
-            resize();
-            // 初期状態を中心にする
-            centerX = targetCenterX = width / 2;
-            centerY = targetCenterY = height / 2;
-            
-            createParticles();
-            
-            window.addEventListener('resize', handleResize);
-            window.addEventListener('mousemove', handleMouseMove);
-            window.addEventListener('touchstart', handleTouchStart, { passive: false });
-            window.addEventListener('touchmove', handleTouchMove, { passive: false });
-            window.addEventListener('touchend', handleTouchEnd, { passive: false });
-            window.addEventListener('mousedown', handleMouseDown);
-            window.addEventListener('keydown', handleKeyDown);
+// 色関数 — hueShiftで全体色相をシフト可能
+function fc(h,s,l,a=1){ return `hsla(${(h+hueShift)%360},${s}%,${l}%,${a})`; }
 
-            animate();
-        }
+function init(){
+    resize();
+    cx=tcx=W/2; cy=tcy=H/2;
+    buildGrain();
+    initWarpLayers();
+    window.addEventListener('mousemove', e=>{
+        tmx=(e.clientX-W/2)/(W/2); tmy=(e.clientY-H/2)/(H/2);
+    });
+    window.addEventListener('mousedown', onTap);
+    window.addEventListener('touchstart', onTS, {passive:false});
+    window.addEventListener('touchmove', onTM, {passive:false});
+    window.addEventListener('touchend', e=>{ if(e.touches.length<2) pinchDist0=null; }, {passive:false});
+    window.addEventListener('keydown', e=>{ if(e.key==='s') saveImg(); });
+    requestAnimationFrame(loop);
+}
 
-        function handleResize() {
-            const oldW = width, oldH = height;
-            resize();
-            targetCenterX = (targetCenterX / oldW) * width;
-            targetCenterY = (targetCenterY / oldH) * height;
-        }
+function resize(){
+    dpr=window.devicePixelRatio||1;
+    W=window.innerWidth; H=window.innerHeight;
+    canvas.width=W*dpr; canvas.height=H*dpr;
+    R=Math.max(W,H)*1.6;
+    buf.width=R; buf.height=R;
+    warpSnapshot.width=W; warpSnapshot.height=H;
+    grainC.width=512; grainC.height=512;
+    buildGrain();
+}
 
-        function handleMouseMove(e) {
-            targetMouseX = (e.clientX - width / 2) / (width / 2);
-            targetMouseY = (e.clientY - height / 2) / (height / 2);
-        }
+function buildGrain(){
+    const img=gctx.createImageData(512,512);
+    for(let i=0;i<img.data.length;i+=4){
+        const v=Math.random()*255;
+        img.data[i]=img.data[i+1]=img.data[i+2]=v; img.data[i+3]=255;
+    }
+    gctx.putImageData(img,0,0);
+}
 
-        function handleMouseDown(e) {
-            const now = Date.now();
-            if (now - lastTapTime < 300) {
-                createParticles();
-            } else {
-                targetCenterX = e.clientX;
-                targetCenterY = e.clientY;
-                cycleSegments();
+// ══════════════════════════════
+//  花モチーフ描画
+// ══════════════════════════════
+
+// 桜 (5弁・丸い)
+function drawSakura(c,r,a,alpha){
+    c.save(); c.rotate(a);
+    for(let i=0;i<5;i++){
+        const ang=(i/5)*Math.PI*2-Math.PI/2;
+        const px=Math.cos(ang)*r*0.38, py=Math.sin(ang)*r*0.38;
+        c.beginPath(); c.ellipse(px,py,r*0.40,r*0.32,ang,0,Math.PI*2);
+        const g=c.createRadialGradient(px,py,0,px,py,r*0.40);
+        g.addColorStop(0,  fc(350,80,90,alpha));
+        g.addColorStop(0.6,fc(340,85,75,alpha*0.8));
+        g.addColorStop(1,  fc(330,70,65,alpha*0.3));
+        c.fillStyle=g; c.fill();
+        c.strokeStyle=fc(345,60,85,alpha*0.4); c.lineWidth=0.5; c.stroke();
+    }
+    c.beginPath(); c.arc(0,0,r*0.15,0,Math.PI*2);
+    c.fillStyle=fc(55,90,80,alpha*0.9); c.fill();
+    c.restore();
+}
+
+// 蓮 (尖った弁・重なり)
+function drawLotus(c,r,a,alpha,n=8){
+    c.save(); c.rotate(a);
+    // 外弁
+    for(let i=0;i<n;i++){
+        const ang=(i/n)*Math.PI*2;
+        c.save(); c.rotate(ang); c.translate(r*0.33,0);
+        const w=r*0.20,h=r*0.52;
+        c.beginPath();
+        c.moveTo(0,0);
+        c.bezierCurveTo(w,-h*0.28,w*0.85,-h*0.78,0,-h);
+        c.bezierCurveTo(-w*0.85,-h*0.78,-w,-h*0.28,0,0);
+        c.closePath();
+        const g=c.createLinearGradient(0,0,0,-h);
+        g.addColorStop(0,   fc(260,55,75,alpha*0.15));
+        g.addColorStop(0.35,fc(260,50,80,alpha*0.75));
+        g.addColorStop(0.7, fc(220,65,78,alpha*0.65));
+        g.addColorStop(1,   fc(190,60,85,alpha*0.4));
+        c.fillStyle=g; c.fill();
+        c.strokeStyle=fc(250,40,80,alpha*0.4); c.lineWidth=0.6; c.stroke();
+        c.beginPath(); c.moveTo(0,-h*0.1); c.lineTo(0,-h*0.88);
+        c.strokeStyle=fc(220,30,90,alpha*0.2); c.lineWidth=0.5; c.stroke();
+        c.restore();
+    }
+    // 内弁
+    for(let i=0;i<n;i++){
+        const ang=(i/n)*Math.PI*2+Math.PI/n;
+        c.save(); c.rotate(ang); c.translate(r*0.14,0);
+        const w=r*0.12,h=r*0.30;
+        c.beginPath();
+        c.moveTo(0,0);
+        c.bezierCurveTo(w,-h*0.3,w*0.7,-h*0.8,0,-h);
+        c.bezierCurveTo(-w*0.7,-h*0.8,-w,-h*0.3,0,0);
+        c.closePath();
+        const g2=c.createLinearGradient(0,0,0,-h);
+        g2.addColorStop(0,  fc(260,40,80,alpha*0.3));
+        g2.addColorStop(1,  fc(0,0,100,alpha*0.75));
+        c.fillStyle=g2; c.fill();
+        c.restore();
+    }
+    c.beginPath(); c.arc(0,0,r*0.12,0,Math.PI*2);
+    c.fillStyle=fc(55,90,78,alpha*0.9); c.fill();
+    c.restore();
+}
+
+// ひまわり
+function drawSunflower(c,r,a,alpha){
+    c.save(); c.rotate(a);
+    for(let i=0;i<16;i++){
+        const ang=(i/16)*Math.PI*2;
+        c.save(); c.rotate(ang); c.translate(r*0.38,0);
+        const w=r*0.13,h=r*0.40;
+        c.beginPath(); c.ellipse(0,-h*0.5,w,h*0.5,0,0,Math.PI*2);
+        const g=c.createLinearGradient(0,0,0,-h);
+        g.addColorStop(0,  fc(48,100,60,alpha*0.5));
+        g.addColorStop(0.5,fc(44,100,68,alpha*0.9));
+        g.addColorStop(1,  fc(38,95,58,alpha*0.6));
+        c.fillStyle=g; c.fill();
+        c.restore();
+    }
+    // 花托
+    c.beginPath(); c.arc(0,0,r*0.26,0,Math.PI*2);
+    const cg=c.createRadialGradient(0,0,0,0,0,r*0.26);
+    cg.addColorStop(0,  fc(35,60,30,alpha*0.95));
+    cg.addColorStop(0.6,fc(28,55,22,alpha*0.85));
+    cg.addColorStop(1,  fc(20,50,15,alpha*0.5));
+    c.fillStyle=cg; c.fill();
+    c.restore();
+}
+
+// 椿
+function drawCamellia(c,r,a,alpha){
+    c.save(); c.rotate(a);
+    for(let i=0;i<5;i++){
+        c.save(); c.rotate((i/5)*Math.PI*2);
+        const w=r*0.42,h=r*0.50;
+        c.beginPath();
+        c.moveTo(0,r*0.08);
+        c.bezierCurveTo(w*1.1,-h*0.08,w*0.9,-h*0.82,0,-h);
+        c.bezierCurveTo(-w*0.9,-h*0.82,-w*1.1,-h*0.08,0,r*0.08);
+        c.closePath();
+        const g=c.createRadialGradient(0,-h*0.35,0,0,-h*0.35,h*0.85);
+        g.addColorStop(0,  fc(350,85,85,alpha*0.9));
+        g.addColorStop(0.5,fc(345,90,65,alpha*0.85));
+        g.addColorStop(1,  fc(340,80,50,alpha*0.5));
+        c.fillStyle=g; c.fill();
+        c.strokeStyle=fc(350,60,80,alpha*0.4); c.lineWidth=0.7; c.stroke();
+        c.restore();
+    }
+    // 雄蕊
+    for(let i=0;i<14;i++){
+        const ang=(i/14)*Math.PI*2, l=r*0.22;
+        c.beginPath();
+        c.moveTo(0,0); c.lineTo(Math.cos(ang)*l,Math.sin(ang)*l);
+        c.strokeStyle=fc(50,100,75,alpha*0.8); c.lineWidth=1; c.stroke();
+        c.beginPath(); c.arc(Math.cos(ang)*l,Math.sin(ang)*l,r*0.038,0,Math.PI*2);
+        c.fillStyle=fc(55,100,80,alpha); c.fill();
+    }
+    c.restore();
+}
+
+// マーガレット
+function drawDaisy(c,r,a,alpha){
+    c.save(); c.rotate(a);
+    for(let i=0;i<14;i++){
+        const ang=(i/14)*Math.PI*2;
+        c.save(); c.rotate(ang); c.translate(r*0.36,0);
+        const w=r*0.095,h=r*0.38;
+        c.beginPath(); c.ellipse(0,-h*0.5,w,h*0.5,0,0,Math.PI*2);
+        const g=c.createLinearGradient(0,0,0,-h);
+        g.addColorStop(0,  fc(0,0,85,alpha*0.5));
+        g.addColorStop(1,  fc(0,0,98,alpha*0.95));
+        c.fillStyle=g; c.fill();
+        c.strokeStyle=fc(200,20,85,alpha*0.3); c.lineWidth=0.4; c.stroke();
+        c.restore();
+    }
+    c.beginPath(); c.arc(0,0,r*0.20,0,Math.PI*2);
+    const yg=c.createRadialGradient(0,0,0,0,0,r*0.20);
+    yg.addColorStop(0,  fc(48,100,72,alpha));
+    yg.addColorStop(1,  fc(35,80,45,alpha*0.6));
+    c.fillStyle=yg; c.fill();
+    c.restore();
+}
+
+// クローバー
+function drawClover(c,r,a,alpha){
+    c.save(); c.rotate(a);
+    for(let i=0;i<3;i++){
+        const ang=(i/3)*Math.PI*2-Math.PI/2;
+        const lx=Math.cos(ang)*r*0.28, ly=Math.sin(ang)*r*0.28;
+        c.beginPath(); c.arc(lx,ly,r*0.32,0,Math.PI*2);
+        const g=c.createRadialGradient(lx,ly,0,lx,ly,r*0.32);
+        g.addColorStop(0,  fc(125,60,62,alpha*0.7));
+        g.addColorStop(0.5,fc(120,55,50,alpha*0.75));
+        g.addColorStop(1,  fc(115,50,40,alpha*0.3));
+        c.fillStyle=g; c.fill();
+        c.strokeStyle=fc(130,50,65,alpha*0.4); c.lineWidth=0.6; c.stroke();
+    }
+    c.beginPath(); c.moveTo(0,r*0.1); c.lineTo(0,r*0.55);
+    c.strokeStyle=fc(120,50,42,alpha*0.6); c.lineWidth=1.2; c.stroke();
+    c.restore();
+}
+
+// 紅葉
+function drawMaple(c,r,a,alpha){
+    c.save(); c.rotate(a);
+    const lobes=7;
+    c.beginPath();
+    for(let i=0;i<=lobes*2;i++){
+        const ang=(i/(lobes*2))*Math.PI*2-Math.PI/2;
+        const rr=i%2===0 ? r*0.50 : r*0.20;
+        const x=Math.cos(ang)*rr, y=Math.sin(ang)*rr;
+        i===0?c.moveTo(x,y):c.lineTo(x,y);
+    }
+    c.closePath();
+    const g=c.createRadialGradient(0,0,0,0,0,r*0.52);
+    g.addColorStop(0,  fc(22,95,72,alpha*0.9));
+    g.addColorStop(0.5,fc(15,90,62,alpha*0.85));
+    g.addColorStop(1,  fc(10,85,50,alpha*0.4));
+    c.fillStyle=g; c.fill();
+    c.strokeStyle=fc(25,70,75,alpha*0.45); c.lineWidth=0.7; c.stroke();
+    c.restore();
+}
+
+// スズラン
+function drawLilyOfValley(c,r,a,alpha){
+    c.save(); c.rotate(a);
+    c.beginPath(); c.moveTo(0,0); c.lineTo(0,-r);
+    c.strokeStyle=fc(125,45,42,alpha*0.55); c.lineWidth=1.4; c.stroke();
+    for(let i=0;i<5;i++){
+        const t=(i+1)/6;
+        const py=-r*t;
+        const px=Math.sin(i*1.1)*r*0.28;
+        c.save(); c.translate(px,py);
+        c.beginPath();
+        c.moveTo(0,0);
+        c.bezierCurveTo(r*0.1,r*0.08,r*0.11,r*0.21,0,r*0.23);
+        c.bezierCurveTo(-r*0.11,r*0.21,-r*0.1,r*0.08,0,0);
+        const g=c.createLinearGradient(0,0,0,r*0.23);
+        g.addColorStop(0,  fc(0,0,96,alpha*0.9));
+        g.addColorStop(1,  fc(200,20,85,alpha*0.6));
+        c.fillStyle=g; c.fill();
+        c.strokeStyle=fc(0,0,100,alpha*0.3); c.lineWidth=0.5; c.stroke();
+        c.restore();
+    }
+    c.restore();
+}
+
+// 小花（汎用5弁）
+function drawSmallFlower(c,r,a,hue,alpha){
+    c.save(); c.rotate(a);
+    for(let i=0;i<5;i++){
+        const ang=(i/5)*Math.PI*2;
+        c.save(); c.rotate(ang); c.translate(r*0.42,0);
+        c.beginPath(); c.arc(0,0,r*0.35,0,Math.PI*2);
+        const g=c.createRadialGradient(0,0,0,0,0,r*0.35);
+        g.addColorStop(0,  fc(hue,75,88,alpha));
+        g.addColorStop(1,  fc(hue,80,65,alpha*0.45));
+        c.fillStyle=g; c.fill();
+        c.strokeStyle=fc(hue,55,78,alpha*0.35); c.lineWidth=0.5; c.stroke();
+        c.restore();
+    }
+    c.beginPath(); c.arc(0,0,r*0.20,0,Math.PI*2);
+    c.fillStyle=fc((hue+50)%360,85,78,alpha); c.fill();
+    c.restore();
+}
+
+// 葉
+function drawLeaf(c,r,a,hue,alpha){
+    c.save(); c.rotate(a);
+    c.beginPath();
+    c.moveTo(0,-r*0.04);
+    c.bezierCurveTo(r*0.24,-r*0.28,r*0.26,-r*0.68,0,-r);
+    c.bezierCurveTo(-r*0.26,-r*0.68,-r*0.24,-r*0.28,0,-r*0.04);
+    c.closePath();
+    const g=c.createLinearGradient(0,0,0,-r);
+    g.addColorStop(0,  fc(hue,58,38,alpha*0.45));
+    g.addColorStop(0.5,fc(hue,62,52,alpha*0.80));
+    g.addColorStop(1,  fc(hue,55,48,alpha*0.55));
+    c.fillStyle=g; c.fill();
+    c.strokeStyle=fc(hue,45,62,alpha*0.45); c.lineWidth=0.5; c.stroke();
+    c.beginPath(); c.moveTo(0,-r*0.06); c.lineTo(0,-r*0.88);
+    c.strokeStyle=fc(hue,35,75,alpha*0.35); c.lineWidth=0.5; c.stroke();
+    c.restore();
+}
+
+// 実（ベリー）
+function drawBerries(c,r,a,alpha){
+    c.save(); c.rotate(a);
+    c.beginPath(); c.moveTo(0,0); c.lineTo(0,-r*0.55);
+    c.strokeStyle=fc(120,38,32,alpha*0.5); c.lineWidth=1; c.stroke();
+    for(let i=0;i<5;i++){
+        const ang=(i/5)*Math.PI*2;
+        const dist=r*0.32;
+        const bxp=Math.cos(ang)*dist, byp=Math.sin(ang)*dist-r*0.45;
+        c.beginPath(); c.arc(bxp,byp,r*0.13,0,Math.PI*2);
+        const g=c.createRadialGradient(bxp-r*0.04,byp-r*0.04,0,bxp,byp,r*0.13);
+        g.addColorStop(0,  fc(0,100,75,alpha));
+        g.addColorStop(0.5,fc(5,95,52,alpha*0.9));
+        g.addColorStop(1,  fc(0,78,32,alpha*0.6));
+        c.fillStyle=g; c.fill();
+    }
+    c.restore();
+}
+
+// 生命の花（中心核）
+function drawFlowerOfLife(c,r,alpha){
+    c.save();
+    const cr=r*0.40;
+    // 6円
+    for(let i=0;i<6;i++){
+        const a=(i/6)*Math.PI*2;
+        c.beginPath(); c.arc(Math.cos(a)*cr,Math.sin(a)*cr,cr,0,Math.PI*2);
+        c.strokeStyle=fc(48,65,68,alpha*0.42);
+        c.lineWidth=1.1; c.stroke();
+    }
+    // 中心円
+    c.beginPath(); c.arc(0,0,cr,0,Math.PI*2);
+    c.strokeStyle=fc(50,72,72,alpha*0.55); c.lineWidth=1.4; c.stroke();
+    // 外縁円
+    c.beginPath(); c.arc(0,0,cr*2,0,Math.PI*2);
+    c.strokeStyle=fc(44,55,62,alpha*0.28); c.lineWidth=0.9; c.stroke();
+    // 塗り
+    const g=c.createRadialGradient(0,0,0,0,0,cr*0.45);
+    g.addColorStop(0,  fc(50,75,88,alpha*0.55));
+    g.addColorStop(0.6,fc(44,65,68,alpha*0.28));
+    g.addColorStop(1,  fc(42,55,55,alpha*0.04));
+    c.fillStyle=g;
+    c.beginPath(); c.arc(0,0,cr*0.45,0,Math.PI*2); c.fill();
+    c.restore();
+}
+
+// ══════════════════════════════
+//  レイヤー配置ヘルパー
+// ══════════════════════════════
+function drawRingLayer(defs, U){
+    defs.forEach(d=>{
+        const dist=d.dist*U, sz=d.size*U;
+        const spinDir=(d.dir||1);
+        const spinBase=time*(d.rotSpeed||0.015)*spinDir;
+        for(let i=0;i<d.count;i++){
+            const baseAng=(i/d.count)*Math.PI*2 + spinBase + (d.rot||0);
+            const x=Math.cos(baseAng)*dist, y=Math.sin(baseAng)*dist;
+            const breathe=1+Math.sin(time*0.85+i*0.68)*0.04;
+            const curSz=sz*breathe;
+            const alp=0.72+Math.sin(time*1.1+i*0.55)*0.14;
+            bx.save(); bx.translate(x,y);
+            switch(d.fn){
+                case 'sakura':       drawSakura(bx,curSz,baseAng,alp);             break;
+                case 'lotus':        drawLotus(bx,curSz,baseAng,alp,d.petals||8); break;
+                case 'sunflower':    drawSunflower(bx,curSz,baseAng,alp);          break;
+                case 'camellia':     drawCamellia(bx,curSz,baseAng,alp);           break;
+                case 'daisy':        drawDaisy(bx,curSz,baseAng,alp);             break;
+                case 'clover':       drawClover(bx,curSz,baseAng,alp);            break;
+                case 'maple':        drawMaple(bx,curSz,baseAng,alp);             break;
+                case 'lily':         drawLilyOfValley(bx,curSz,baseAng,alp);      break;
+                case 'berry':        drawBerries(bx,curSz,baseAng,alp);           break;
+                case 'smallflower':  drawSmallFlower(bx,curSz,baseAng,d.hue||340,alp); break;
+                case 'leaf':         drawLeaf(bx,curSz,baseAng,d.hue||120,alp);   break;
             }
-            lastTapTime = now;
+            bx.restore();
+        }
+    });
+}
+
+// ══════════════════════════════
+//  メインシーン描画
+// ══════════════════════════════
+function drawScene(){
+    bx.fillStyle='#000'; bx.fillRect(0,0,buf.width,buf.height);
+    bx.save();
+    bx.translate(buf.width/2, buf.height/2);
+
+    const bp=1+beat*0.045;
+    bx.scale(zoom*bp, zoom*bp);
+    const sx=Math.sin(time*0.34)*28+Math.sin(time*0.88)*9;
+    const sy=Math.cos(time*0.37)*28+Math.cos(time*0.79)*9;
+    bx.translate(mx*75+sx, my*75+sy);
+
+    bx.globalCompositeOperation='lighter';
+
+    const U=R*0.5;
+
+    // トンネル（薄い花色リング）
+    for(let i=0;i<10;i++){
+        let p=1-((i/10+time*0.28)%1);
+        const sc=Math.pow(p,2.3);
+        const rr=sc*R*1.02; if(rr<1) continue;
+        const a2=Math.min((1-p)*1.8,0.28)*Math.pow(p,0.65);
+        const hues=[340,220,120,42,270,0,180,160,30,300];
+        bx.beginPath(); bx.arc(0,0,rr,0,Math.PI*2);
+        bx.strokeStyle=fc(hues[i%hues.length],65,65,a2);
+        bx.lineWidth=0.4+p*2; bx.stroke();
+    }
+
+    // 装飾同心リング
+    [[0.062,50,1.4],[0.118,120,1.0],[0.178,340,1.4],[0.235,220,0.9],
+     [0.295,48, 1.8],[0.355,180,1.2],[0.415,28, 1.4],[0.472,270,0.9]]
+    .forEach(([r,h,lw])=>{
+        bx.beginPath(); bx.arc(0,0,r*U*2*(1+Math.sin(time*0.45+r*18)*0.008),0,Math.PI*2);
+        bx.strokeStyle=fc(h,60,68,0.32); bx.lineWidth=lw; bx.stroke();
+    });
+
+    // ── 第5帯（最外）──
+    drawRingLayer([
+        {fn:'maple',     dist:0.46,size:0.058,count:8, rot:0.30,rotSpeed:0.012},
+        {fn:'sunflower', dist:0.43,size:0.048,count:7, rot:-0.40,rotSpeed:0.014},
+        {fn:'camellia',  dist:0.41,size:0.043,count:8, rot:0.50,rotSpeed:0.010},
+        {fn:'berry',     dist:0.47,size:0.038,count:12,rot:0.20,rotSpeed:0.016},
+        {fn:'leaf',      dist:0.44,size:0.052,count:12,rot:0.00,rotSpeed:0.013,hue:122},
+        {fn:'smallflower',dist:0.45,size:0.028,count:16,rot:0.15,rotSpeed:0.018,hue:200},
+    ],U);
+
+    // ── 第4帯 ──
+    drawRingLayer([
+        {fn:'lily',      dist:0.345,size:0.048,count:8, rot:0.10,rotSpeed:-0.012,dir:-1},
+        {fn:'sakura',    dist:0.325,size:0.042,count:10,rot:-0.20,rotSpeed:0.014},
+        {fn:'clover',    dist:0.355,size:0.038,count:10,rot:0.30,rotSpeed:-0.010,dir:-1},
+        {fn:'smallflower',dist:0.315,size:0.028,count:16,rot:0.00,rotSpeed:0.017,hue:340},
+        {fn:'leaf',      dist:0.365,size:0.038,count:8, rot:0.00,rotSpeed:0.011,hue:132},
+    ],U);
+
+    // ── 第3帯 ──
+    drawRingLayer([
+        {fn:'lotus',     dist:0.250,size:0.052,count:6, rot:0.00,rotSpeed:0.010,petals:8},
+        {fn:'daisy',     dist:0.230,size:0.036,count:10,rot:0.30,rotSpeed:-0.013,dir:-1},
+        {fn:'clover',    dist:0.262,size:0.030,count:8, rot:-0.20,rotSpeed:0.011},
+        {fn:'smallflower',dist:0.240,size:0.024,count:12,rot:0.00,rotSpeed:-0.015,dir:-1,hue:220},
+        {fn:'leaf',      dist:0.270,size:0.036,count:6, rot:0.00,rotSpeed:0.010,hue:142},
+    ],U);
+
+    // ── 第2帯 ──
+    drawRingLayer([
+        {fn:'sakura',    dist:0.158,size:0.038,count:6, rot:0.00,rotSpeed:0.014},
+        {fn:'lotus',     dist:0.140,size:0.036,count:5, rot:0.50,rotSpeed:-0.012,dir:-1,petals:6},
+        {fn:'daisy',     dist:0.168,size:0.026,count:8, rot:-0.30,rotSpeed:0.013},
+        {fn:'smallflower',dist:0.148,size:0.020,count:10,rot:0.00,rotSpeed:-0.016,dir:-1,hue:270},
+        {fn:'leaf',      dist:0.178,size:0.028,count:6, rot:0.00,rotSpeed:0.011,hue:120},
+    ],U);
+
+    // ── 第1帯（最内） ──
+    drawRingLayer([
+        {fn:'lotus',     dist:0.082,size:0.030,count:4, rot:0.00,rotSpeed:0.016},
+        {fn:'sakura',    dist:0.072,size:0.023,count:5, rot:0.40,rotSpeed:-0.014,dir:-1},
+        {fn:'smallflower',dist:0.090,size:0.017,count:8, rot:0.00,rotSpeed:0.018,hue:150},
+    ],U);
+
+    // ── 中心：生命の花 ──
+    drawFlowerOfLife(bx, U*0.068, 0.72+Math.sin(time*0.55)*0.10);
+
+    // ── 最中心の光点 ──
+    const bloom=0.55+eyeOpen*0.38;
+    const cr2=U*0.016*bloom;
+    const cg=bx.createRadialGradient(0,0,0,0,0,cr2*4.5);
+    cg.addColorStop(0,  fc(55,80,98,bloom*0.88));
+    cg.addColorStop(0.3,fc(50,70,85,bloom*0.55));
+    cg.addColorStop(1,  fc(45,55,70,0));
+    bx.fillStyle=cg;
+    bx.beginPath(); bx.arc(0,0,cr2*4.5,0,Math.PI*2); bx.fill();
+
+    bx.restore();
+    bx.globalCompositeOperation='source-over';
+}
+
+// ─── MAIN LOOP ─────────────────────────────
+function loop(){
+    requestAnimationFrame(loop);
+    time+=0.008;
+
+    beatV+=(Math.pow(Math.max(0,Math.sin(time*3.14)),8)*0.5-beat*0.15);
+    beat+=beatV*0.3; beat=Math.max(0,beat);
+
+    eyeOpen=0.42+Math.sin(time*0.17)*0.28+Math.sin(time*0.07)*0.18;
+    globalHue=(globalHue+2.2)%360;
+
+    cx+=(tcx-cx)*0.1; cy+=(tcy-cy)*0.1;
+    mx+=(tmx-mx)*0.04; my+=(tmy-my)*0.04;
+    if(!isFinite(cx)) cx=W/2; if(!isFinite(cy)) cy=H/2;
+
+    drawScene(); // bufに花曼荼羅を描く
+
+    // ── メインキャンバスへの出力 ──
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+
+    // 残像エフェクト（添付コードより）— 黒で薄く塗り重ね
+    ctx.fillStyle='rgba(0,0,0,0.18)';
+    ctx.fillRect(0,0,W,H);
+
+    // ── カリダイスコープ反射（花曼荼羅のbufを使用）──
+    const sa=(Math.PI*2)/segments;
+    ctx.save(); ctx.translate(cx,cy);
+    ctx.rotate(time*0.011);
+    const pulse=1+Math.sin(time*0.19)*0.014+beat*0.009;
+    ctx.scale(pulse,pulse);
+    for(let i=0;i<segments;i++){
+        ctx.save(); ctx.rotate(i*sa);
+        if(i%2===1) ctx.scale(1,-1);
+        ctx.beginPath(); ctx.moveTo(0,0);
+        ctx.arc(0,0,R,-sa/2,sa/2);
+        ctx.lineTo(0,0); ctx.clip();
+        ctx.drawImage(buf,0,-R/2,R,R);
+        ctx.restore();
+    }
+    ctx.restore();
+
+    // カリダイスコープ結果をワープ用にスナップショット
+    wsx.drawImage(canvas, 0, 0, W*dpr, H*dpr, 0, 0, W, H);
+
+    // ── ワープレイヤー（添付コードのスケールアップ多層）──
+    // カリダイスコープ済みのcanvasをwarpSnapshotに取り込んでループ投影
+    const wSnap = warpSnapshot;
+    ctx.save();
+    const globalSpin = time*0.18;
+    warpLayers.forEach((layer, idx) => {
+        // スケール加速（手前に突進）
+        const warpSpeed = 0.06 + beat*0.04;
+        layer.scale += warpSpeed * (layer.scale + 0.08);
+        if(layer.scale > 9){
+            layer.scale = 0.04;
+            layer.driftX = (Math.random()-0.5)*14;
+            layer.driftY = (Math.random()-0.5)*14;
         }
 
-        function handleTouchStart(e) {
-            e.preventDefault();
-            if (e.touches.length === 2) {
-                initialPinchDist = Math.hypot(
-                    e.touches[0].pageX - e.touches[1].pageX,
-                    e.touches[0].pageY - e.touches[1].pageY
-                );
-                initialZoom = zoom;
-            } else if (e.touches.length === 1) {
-                const now = Date.now();
-                const touch = e.touches[0];
-                if (now - lastTapTime < 300) {
-                    createParticles();
-                } else {
-                    targetCenterX = touch.clientX;
-                    targetCenterY = touch.clientY;
-                    cycleSegments();
-                }
-                lastTapTime = now;
-            }
-        }
+        // フェード（奥から湧き出し、手前で消える）
+        let alpha = 1;
+        if(layer.scale < 0.4) alpha = layer.scale*2.5;
+        if(layer.scale > 6.5) alpha = Math.max(0,(1-(layer.scale-6.5)/2.5));
+        alpha *= 0.55; // 控えめに重ねる
 
-        function handleTouchMove(e) {
-            e.preventDefault();
-            if (e.touches.length === 2 && initialPinchDist !== null) {
-                const currentDist = Math.hypot(
-                    e.touches[0].pageX - e.touches[1].pageX,
-                    e.touches[0].pageY - e.touches[1].pageY
-                );
-                const delta = currentDist / initialPinchDist;
-                zoom = Math.min(Math.max(initialZoom * delta, 0.4), 4.0);
-            } else if (e.touches.length === 1) {
-                const touch = e.touches[0];
-                targetCenterX = touch.clientX;
-                targetCenterY = touch.clientY;
-            }
-        }
+        const jx = (Math.random()-0.5)*layer.scale*1.2;
+        const jy = (Math.random()-0.5)*layer.scale*1.2;
 
-        function handleTouchEnd(e) {
-            if (e.touches.length < 2) initialPinchDist = null;
-        }
+        ctx.save();
+        // hue-rotateで層ごとに色相変化（添付コードの核心）
+        const layerHue = (globalHue + idx*18 + hueShift) % 360;
+        ctx.filter = `hue-rotate(${layerHue}deg) brightness(1.15) saturate(1.4)`;
+        ctx.globalAlpha = alpha;
+        ctx.globalCompositeOperation = 'lighter';
 
-        function handleKeyDown(e) {
-            // キーボードショートカットは利便性のために残す
-            if (e.key.toLowerCase() === 's') saveImage();
-        }
+        ctx.translate(cx + layer.driftX + jx, cy + layer.driftY + jy);
+        const dir = idx%2===0 ? 1 : -1;
+        const rot = layer.rotOffset + time*1.2*layer.rotMult*dir + globalSpin;
+        ctx.rotate(rot);
 
-        function saveImage() {
-            const link = document.createElement('a');
-            link.download = `kaleidoscope-${Date.now()}.png`;
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-        }
+        const sw = W*layer.scale, sh = H*layer.scale;
+        ctx.drawImage(wSnap, -sw/2, -sh/2, sw, sh);
+        ctx.restore();
+    });
+    ctx.filter='none';
+    ctx.globalAlpha=1;
+    ctx.globalCompositeOperation='source-over';
+    ctx.restore();
 
-        function cycleSegments() {
-            const options = [6, 8, 12, 16, 24, 32];
-            let currentIndex = options.indexOf(segments);
-            segments = options[(currentIndex + 1) % options.length];
-        }
+    // ── ビネット（花曼荼羅の黒背景感を守る）──
+    const vg=ctx.createRadialGradient(cx,cy,0,cx,cy,R*1.08);
+    vg.addColorStop(0,  'rgba(0,0,0,0.72)');
+    vg.addColorStop(0.08,'rgba(0,0,0,0)');
+    vg.addColorStop(0.78,'rgba(0,0,0,0)');
+    vg.addColorStop(1,  'rgba(0,0,0,0.90)');
+    ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
 
-        function resize() {
-            dpr = window.devicePixelRatio || 1;
-            width = window.innerWidth;
-            height = window.innerHeight;
-            canvas.width = width * dpr;
-            canvas.height = height * dpr;
-            radius = Math.max(width, height) * 1.5;
-            buffer.width = radius;
-            buffer.height = radius;
-        }
+    // ── スピードライン（添付コードより）──
+    ctx.globalCompositeOperation='source-over';
+    speedLines.forEach(p=>{
+        p.dist += 7.5*p.spd + beat*18;
+        p.angle += 0.0015;
+        if(p.dist > 2400) p.dist = 0;
+        const x1=cx+Math.cos(p.angle)*p.dist;
+        const y1=cy+Math.sin(p.angle)*p.dist;
+        const len = p.len*(1+beat*1.5);
+        const x2=cx+Math.cos(p.angle)*(p.dist+len);
+        const y2=cy+Math.sin(p.angle)*(p.dist+len);
+        const sg=ctx.createLinearGradient(x1,y1,x2,y2);
+        sg.addColorStop(0,'rgba(255,255,255,0)');
+        sg.addColorStop(1,`rgba(255,255,255,${0.35+beat*0.3})`);
+        ctx.strokeStyle=sg; ctx.lineWidth=1.2;
+        ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+    });
 
-        function createParticles() {
-            particles = [];
-            const rand = Math.random();
-            let theme = rand < 0.4 ? 'warm' : (rand < 0.8 ? 'pastel' : 'random');
-            const warmHues = [0, 15, 30, 45, 60, 345, 355];
-            let baseHue = warmHues[Math.floor(Math.random() * warmHues.length)];
+    document.getElementById('seg-display').textContent=segments+' FOLD';
+}
 
-            for (let i = 0; i < PARTICLE_COUNT; i++) {
-                let h, s, l;
-                if (theme === 'pastel') {
-                    h = Math.random() * 360;
-                    s = 50 + Math.random() * 30;
-                    l = 75 + Math.random() * 15;
-                } else if (theme === 'warm') {
-                    h = (baseHue + Math.random() * 80 - 40) % 360;
-                    s = 85 + Math.random() * 15;
-                    l = 50 + Math.random() * 30;
-                } else {
-                    h = Math.random() * 360;
-                    s = 80 + Math.random() * 20;
-                    l = 55 + Math.random() * 25;
-                }
+// ─── INTERACTION ───────────────────────────
+function onTap(e){
+    const now=Date.now();
+    if(now-lastTap<280){ hueShift=(hueShift+60)%360; eyeOpen=1; }
+    else { tcx=e.clientX; tcy=e.clientY; cycleSeg(); }
+    lastTap=now;
+}
+function onTS(e){
+    e.preventDefault();
+    if(e.touches.length===2){
+        pinchDist0=Math.hypot(e.touches[0].pageX-e.touches[1].pageX,e.touches[0].pageY-e.touches[1].pageY);
+        zoom0=zoom;
+    } else if(e.touches.length===1){
+        const now=Date.now(),t=e.touches[0];
+        if(now-lastTap<280){ hueShift=(hueShift+60)%360; eyeOpen=1; }
+        else { tcx=t.clientX; tcy=t.clientY; cycleSeg(); }
+        lastTap=now;
+    }
+}
+function onTM(e){
+    e.preventDefault();
+    if(e.touches.length===2&&pinchDist0){
+        const d=Math.hypot(e.touches[0].pageX-e.touches[1].pageX,e.touches[0].pageY-e.touches[1].pageY);
+        zoom=Math.min(Math.max(zoom0*(d/pinchDist0),0.3),5);
+    } else if(e.touches.length===1){
+        const t=e.touches[0];
+        tmx=(t.clientX-W/2)/(W/2); tmy=(t.clientY-H/2)/(H/2);
+        tcx=t.clientX; tcy=t.clientY;
+    }
+}
+function cycleSeg(){
+    const o=[6,8,10,12,16,18,24];
+    let i=o.indexOf(segments);
+    segments=o[(i+1)%o.length];
+}
+function saveImg(){
+    const a=document.createElement('a');
+    a.download=`hana-mandala-${Date.now()}.png`;
+    a.href=canvas.toDataURL('image/png'); a.click();
+}
 
-                particles.push({
-                    angle: Math.random() * Math.PI * 2,
-                    dist: Math.random(), 
-                    speed: 0.0005 + Math.random() * 0.002,
-                    size: 12 + Math.random() * 53, 
-                    rot: Math.random() * Math.PI * 2,
-                    vr: (Math.random() - 0.5) * 0.015,
-                    hue: h,
-                    sat: s,
-                    light: l,
-                    offset: Math.random() * 100
-                });
-            }
-        }
-
-        function drawSource() {
-            bctx.fillStyle = '#050505';
-            bctx.fillRect(0, 0, buffer.width, buffer.height);
-            bctx.save();
-            bctx.translate(buffer.width / 2, buffer.height / 2);
-            bctx.scale(zoom, zoom);
-            bctx.translate(mouseX * 120, mouseY * 120);
-            bctx.rotate(time * 0.01);
-
-            for (let i = 0; i < PARTICLE_COUNT; i++) {
-                const p = particles[i];
-                p.dist += p.speed;
-                if (p.dist > 1.2) { p.dist = 0; p.angle = Math.random() * Math.PI * 2; }
-
-                const scale = Math.pow(p.dist, 2.2); 
-                const currentDist = p.dist * radius; 
-                const currentSize = p.size * (0.2 + scale * 2.5); 
-                const alpha = Math.min(p.dist * 5.0, 0.8) * (1.1 - p.dist);
-                if (alpha < 0.05) continue;
-
-                bctx.save();
-                bctx.rotate(p.angle);
-                bctx.translate(currentDist, Math.sin(time * 0.2 + p.offset) * 12);
-                bctx.rotate(p.rot + time * p.vr * 10);
-                
-                const grad = bctx.createRadialGradient(0, 0, 0, 0, 0, currentSize);
-                grad.addColorStop(0, `hsla(${p.hue}, ${p.sat}%, ${p.light + 10}%, ${alpha})`);
-                grad.addColorStop(0.4, `hsla(${p.hue}, ${p.sat}%, ${p.light - 10}%, ${alpha * 0.6})`);
-                grad.addColorStop(1, `hsla(${p.hue}, ${p.sat}%, ${p.light - 30}%, 0)`);
-                
-                bctx.fillStyle = grad;
-                bctx.beginPath();
-                bctx.arc(0, 0, currentSize, 0, Math.PI * 2);
-                bctx.fill();
-
-                if (alpha > 0.2) {
-                    bctx.strokeStyle = `hsla(${p.hue}, 100%, 90%, ${alpha * 0.4})`;
-                    bctx.lineWidth = 1;
-                    bctx.stroke();
-                }
-                bctx.restore();
-            }
-            bctx.restore();
-        }
-
-        function animate() {
-            requestAnimationFrame(animate);
-            time += 0.01;
-            centerX += (targetCenterX - centerX) * 0.12;
-            centerY += (targetCenterY - centerY) * 0.12;
-            mouseX += (targetMouseX - mouseX) * 0.05;
-            mouseY += (targetMouseY - mouseY) * 0.05;
-
-            drawSource();
-            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            ctx.fillStyle = '#000';
-            ctx.fillRect(0, 0, width, height);
-
-            const sliceAngle = (Math.PI * 2) / segments;
-            ctx.save();
-            ctx.translate(centerX, centerY);
-            for (let i = 0; i < segments; i++) {
-                ctx.save();
-                ctx.rotate(i * sliceAngle);
-                if (i % 2 === 1) ctx.scale(1, -1);
-                ctx.beginPath();
-                ctx.moveTo(0, 0);
-                ctx.arc(0, 0, radius, -sliceAngle / 2, sliceAngle / 2);
-                ctx.lineTo(0, 0);
-                ctx.clip();
-                ctx.drawImage(buffer, 0, -radius / 2, radius, radius);
-                ctx.restore();
-            }
-            ctx.restore();
-            
-            const centerGlow = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius * 0.95);
-            centerGlow.addColorStop(0, 'rgba(0,0,0,0.2)');
-            centerGlow.addColorStop(0.25, 'rgba(0,0,0,0)');
-            centerGlow.addColorStop(1, 'rgba(0,0,0,0.75)');
-            ctx.fillStyle = centerGlow;
-            ctx.fillRect(0, 0, width, height);
-        }
-
-        window.onload = init;
-    </script>
+window.onload=init;
+</script>
 </body>
 </html>
