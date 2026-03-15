@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     
     <!-- GitHub Repo Optimization: Meta Tags -->
-    <title>Interactive Kaleidoscope - Mobile Optimized</title>
-    <meta name="description" content="A high-performance, interactive kaleidoscope built with HTML5 Canvas. Optimized for mobile devices.">
+    <title>Interactive Kaleidoscope - Ultra Mobile Optimized</title>
+    <meta name="description" content="A high-performance, interactive kaleidoscope built with HTML5 Canvas. Ultra-optimized for mobile visibility.">
     <meta property="og:title" content="Interactive Kaleidoscope">
-    <meta property="og:description" content="Optimized visual experience for all devices.">
+    <meta property="og:description" content="Extreme visual experience optimized for mobile performance.">
     <meta property="og:type" content="website">
     <meta name="author" content="GitHub Contributor">
 
@@ -48,37 +48,37 @@
             pointer-events: none;
         }
         .guide-text {
-            color: rgba(255, 255, 255, 0.8);
+            color: rgba(255, 255, 255, 0.9);
             font-size: 11px;
             text-transform: uppercase;
             letter-spacing: 0.15em;
             text-align: center;
-            background: rgba(0, 0, 0, 0.6);
-            backdrop-filter: blur(8px);
-            padding: 10px 20px;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            padding: 10px 24px;
             border-radius: 30px;
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
             white-space: nowrap;
         }
         .action-btns {
             display: flex;
-            gap: 8px;
+            gap: 10px;
         }
         .icon-btn {
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(8px);
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.2);
-            padding: 10px;
+            padding: 12px;
             border-radius: 50%;
-            transition: all 0.3s ease;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
-        .icon-btn:hover {
-            background: rgba(255, 255, 255, 0.25);
-            transform: scale(1.1);
+        .icon-btn:active {
+            transform: scale(0.9);
+            background: rgba(255, 255, 255, 0.3);
         }
         @media (max-width: 640px) {
-            .guide-text { font-size: 10px; padding: 8px 16px; }
+            .guide-text { font-size: 10px; padding: 8px 20px; }
         }
     </style>
 </head>
@@ -87,12 +87,12 @@
     <div id="ui" class="ui-container">
         <div class="action-btns">
             <!-- 画像保存ボタン -->
-            <button id="btn-save" class="icon-btn" title="画像を保存">
+            <button id="btn-save" class="icon-btn" title="Save Image">
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
             </button>
             <!-- UI表示切替ボタン -->
-            <button id="btn-hide" class="icon-btn" title="UIを隠す">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45(0-0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+            <button id="btn-hide" class="icon-btn" title="Toggle UI">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
             </button>
         </div>
         <div class="guide-text">
@@ -104,7 +104,7 @@
 
     <script>
         /**
-         * Interactive Kaleidoscope - Mobile Performance Optimized
+         * Interactive Kaleidoscope - Ultra Mobile Performance & Visibility Optimized
          */
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d', { alpha: false });
@@ -127,9 +127,9 @@
         let lastTapTime = 0;
         let uiVisible = true;
 
-        // モバイル向けに数量を大幅に削減 (7425 -> 1500)
-        // その分一粒のサイズと変化量を調整して見栄えを維持
-        const PARTICLE_COUNT = 1500; 
+        // パフォーマンス向上のためパーティクル数をさらに削減 (1500 -> 800)
+        // その分、一粒の存在感を強化
+        const PARTICLE_COUNT = 800; 
         let particles = [];
 
         function init() {
@@ -245,8 +245,6 @@
         }
 
         function resize() {
-            // パフォーマンスのためdprを2以下に制限することが多いが、
-            // ここでは標準的な設定を維持
             dpr = window.devicePixelRatio || 1;
             width = window.innerWidth;
             height = window.innerHeight;
@@ -259,47 +257,39 @@
 
         function createParticles() {
             particles = [];
-            
             const rand = Math.random();
-            let theme = 'random';
-            if (rand < 0.4) theme = 'warm';
-            else if (rand < 0.8) theme = 'pastel';
+            let theme = rand < 0.4 ? 'warm' : (rand < 0.8 ? 'pastel' : 'random');
 
             const warmHues = [0, 15, 30, 45, 60, 345, 355];
-            let baseHue = Math.random() * 360;
-            if (theme === 'warm') {
-                baseHue = warmHues[Math.floor(Math.random() * warmHues.length)];
-            }
+            let baseHue = warmHues[Math.floor(Math.random() * warmHues.length)];
 
             for (let i = 0; i < PARTICLE_COUNT; i++) {
                 let h, s, l;
-                
                 if (theme === 'pastel') {
                     h = Math.random() * 360;
-                    s = 40 + Math.random() * 30;
-                    l = 80 + Math.random() * 10;
+                    s = 50 + Math.random() * 30;
+                    l = 75 + Math.random() * 15;
                 } else if (theme === 'warm') {
-                    h = (baseHue + Math.random() * 60 - 30) % 360;
-                    s = 80 + Math.random() * 20;
-                    l = 50 + Math.random() * 25;
+                    h = (baseHue + Math.random() * 80 - 40) % 360;
+                    s = 85 + Math.random() * 15;
+                    l = 50 + Math.random() * 30;
                 } else {
                     h = Math.random() * 360;
-                    s = 70 + Math.random() * 30;
-                    l = 50 + Math.random() * 20;
+                    s = 80 + Math.random() * 20;
+                    l = 55 + Math.random() * 25;
                 }
 
                 particles.push({
                     angle: Math.random() * Math.PI * 2,
                     dist: Math.random(), 
-                    speed: 0.0004 + Math.random() * 0.0022,
-                    // 個数が減った分、最大サイズを少し大きく設定 (4-22 -> 8-45)
-                    size: 8 + Math.random() * 37, 
+                    speed: 0.0005 + Math.random() * 0.002,
+                    // 数量が減った分、一粒を大きく (8-37 -> 12-65)
+                    size: 12 + Math.random() * 53, 
                     rot: Math.random() * Math.PI * 2,
-                    vr: (Math.random() - 0.5) * 0.012,
+                    vr: (Math.random() - 0.5) * 0.015,
                     hue: h,
                     sat: s,
                     light: l,
-                    sides: Math.floor(Math.random() * 4) + 3,
                     offset: Math.random() * 100
                 });
             }
@@ -312,10 +302,9 @@
             bctx.save();
             bctx.translate(buffer.width / 2, buffer.height / 2);
             bctx.scale(zoom, zoom);
-            bctx.translate(mouseX * 150, mouseY * 150);
-            bctx.rotate(time * 0.012);
+            bctx.translate(mouseX * 120, mouseY * 120);
+            bctx.rotate(time * 0.01);
 
-            // 高速な描画のためのループ
             for (let i = 0; i < PARTICLE_COUNT; i++) {
                 const p = particles[i];
                 p.dist += p.speed;
@@ -324,27 +313,37 @@
                     p.angle = Math.random() * Math.PI * 2; 
                 }
 
-                // 遠近感を出すためのスケーリングを少し強めに (1.3 -> 1.5)
-                const scale = Math.pow(p.dist, 1.5); 
-                const currentDist = p.dist * radius * 0.98;
-                const currentSize = p.size * (0.1 + scale * 2.0); 
-                const alpha = Math.min(p.dist * 4.0, 0.75) * (1.1 - p.dist);
+                // スケーリングをさらに強化 (1.5 -> 2.2)
+                const scale = Math.pow(p.dist, 2.2); 
+                const currentDist = p.dist * radius * 1.0; 
+                const currentSize = p.size * (0.2 + scale * 2.5); 
+                const alpha = Math.min(p.dist * 5.0, 0.8) * (1.1 - p.dist);
 
                 if (alpha < 0.05) continue;
 
                 bctx.save();
                 bctx.rotate(p.angle);
-                bctx.translate(currentDist, Math.sin(time * 0.15 + p.offset) * 10);
-                bctx.rotate(p.rot + time * p.vr * 8);
+                bctx.translate(currentDist, Math.sin(time * 0.2 + p.offset) * 12);
+                bctx.rotate(p.rot + time * p.vr * 10);
                 
+                // グラデーションの強化：中心をより明るく
                 const grad = bctx.createRadialGradient(0, 0, 0, 0, 0, currentSize);
-                grad.addColorStop(0, `hsla(${p.hue}, ${p.sat}%, ${p.light}%, ${alpha})`);
-                grad.addColorStop(0.5, `hsla(${p.hue}, ${p.sat}%, ${p.light - 15}%, ${alpha * 0.4})`);
+                grad.addColorStop(0, `hsla(${p.hue}, ${p.sat}%, ${p.light + 10}%, ${alpha})`);
+                grad.addColorStop(0.4, `hsla(${p.hue}, ${p.sat}%, ${p.light - 10}%, ${alpha * 0.6})`);
                 grad.addColorStop(1, `hsla(${p.hue}, ${p.sat}%, ${p.light - 30}%, 0)`);
                 
                 bctx.fillStyle = grad;
-                // パスを描画するよりfillRectの方が負荷が低い場合がある
-                bctx.fillRect(-currentSize, -currentSize, currentSize * 2, currentSize * 2);
+                // 円形を描画 (パスを簡略化)
+                bctx.beginPath();
+                bctx.arc(0, 0, currentSize, 0, Math.PI * 2);
+                bctx.fill();
+
+                // 視認性向上のためのエッジグロー
+                if (alpha > 0.2) {
+                    bctx.strokeStyle = `hsla(${p.hue}, 100%, 90%, ${alpha * 0.4})`;
+                    bctx.lineWidth = 1;
+                    bctx.stroke();
+                }
 
                 bctx.restore();
             }
@@ -355,8 +354,8 @@
             requestAnimationFrame(animate);
             time += 0.01;
 
-            centerX += (targetCenterX - centerX) * 0.1;
-            centerY += (targetCenterY - centerY) * 0.1;
+            centerX += (targetCenterX - centerX) * 0.12;
+            centerY += (targetCenterY - centerY) * 0.12;
             mouseX += (targetMouseX - mouseX) * 0.05;
             mouseY += (targetMouseY - mouseY) * 0.05;
 
@@ -387,10 +386,11 @@
             }
             ctx.restore();
             
-            const centerGlow = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius * 0.9);
+            // 視覚的奥行きの微調整
+            const centerGlow = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius * 0.95);
             centerGlow.addColorStop(0, 'rgba(0,0,0,0.2)');
-            centerGlow.addColorStop(0.3, 'rgba(0,0,0,0)');
-            centerGlow.addColorStop(1, 'rgba(0,0,0,0.6)');
+            centerGlow.addColorStop(0.25, 'rgba(0,0,0,0)');
+            centerGlow.addColorStop(1, 'rgba(0,0,0,0.75)');
             ctx.fillStyle = centerGlow;
             ctx.fillRect(0, 0, width, height);
         }
